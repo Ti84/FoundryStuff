@@ -1,0 +1,21 @@
+{
+  "id": "season-of-ghosts-minigames",
+  "title": "Season of Ghosts Minigames",
+  "description": "Small table minigames for a Season of Ghosts campaign, starting with the Qi Zhong healing shrine.",
+  "version": "0.1.9",
+  "authors": [
+    {
+      "name": "Shane and Codex"
+    }
+  ],
+  "compatibility": {
+    "minimum": "13",
+    "verified": "13"
+  },
+  "esmodules": [
+    "scripts/main.js"
+  ],
+  "styles": [
+    "styles/minigames.css"
+  ]
+}

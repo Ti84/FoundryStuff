@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Season of Ghosts Minigames Dev Test</title>
+    <link rel="stylesheet" href="./styles/minigames.css?v=0.1.9">
+    <style>
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        background: #171b1c;
+        color: #f4ead3;
+        font-family: Georgia, "Times New Roman", serif;
+      }
+
+      main {
+        width: min(720px, calc(100vw - 32px));
+        padding: 24px;
+        border: 1px solid #6e6148;
+        border-radius: 8px;
+        background: #222826;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+      }
+
+      p {
+        line-height: 1.5;
+      }
+
+      button {
+        min-height: 40px;
+        padding: 0 14px;
+        border: 1px solid #8a7856;
+        border-radius: 6px;
+        background: #332e24;
+        color: #fff4d7;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Season of Ghosts Minigames</h1>
+      <p>Local visual test harness. This checks the game UI and button behavior outside Foundry. Final module behavior still needs a Forge test.</p>
+      <button type="button" data-sog-open="healing-shrine">Open Qi Zhong's Gecko Guardian</button>
+    </main>
+
+    <script src="./scripts/main.js"></script>
+  </body>
+</html>
