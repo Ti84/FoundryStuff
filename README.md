@@ -40,4 +40,4 @@ This is only a visual and button-behavior test. Use Forge for the real module te
 
 ## Audio
 
-The game uses packaged `.wav` files for the intro sting, arcade button clicks, rain, thunder, and the blessed coin heartbeat. Browsers may block ambient audio until the first click. Use the in-game **Sound On/Off** button to retry or mute.
+The game uses packaged `.wav` files for the intro sting, arcade button clicks, a storm loop, and the blessed coin heartbeat. Browsers may block ambient audio until the first click. Use the in-game **Sound On/Off** button to retry or mute.
