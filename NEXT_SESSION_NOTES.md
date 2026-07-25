@@ -6,7 +6,7 @@ This is the portable handoff memory for continuing the Season of Ghosts Foundry 
 
 - Repo/module path on this machine: `C:\Users\sc897\OneDrive\Documents\Shane Remote\Personal\PF2E\foundry-modules\season-of-ghosts-minigames`
 - Foundry module id: `season-of-ghosts-minigames`
-- Current module version: `0.2.0`
+- Current module version: `0.12.0`
 - Foundry compatibility: v13 minimum / verified
 - Main logic: `scripts/main.js`
 - Main styles: `styles/minigames.css`
@@ -69,8 +69,66 @@ Behavior:
   - Sprites continuously move downriver.
   - Hazards and ramps scroll through the viewport.
   - Players steer with arrow keys or the **Steer Left / Steer Right / Straight** buttons.
-  - Ramps give a temporary speed boost.
-  - Obstacles deal `3` damage per hit.
+  - Cute cartoon ghost-on-sled sprites replace circular portrait tokens.
+  - The course uses a diagonal, scrolling arcade perspective inspired by the
+    supplied Club Penguin Sled Racing reference, with a creepy moonlit riverbank.
+  - Race pacing is deliberately slower, targeting a roughly 30-second clean run.
+  - The shorter field of view and horizon fog hide incoming obstacles until
+    they approach, while obstacle rows are spaced farther apart.
+  - Consecutive ramps always change lanes, adding movement pressure without
+    increasing the damage penalty.
+  - The background includes an animated blood moon, driving rain, and dark
+    tree-lined banks. Lantern wreckage was removed in favor of green ghost hands.
+  - Version 0.6 changes the course to true left-to-right side scrolling. Progress
+    moves horizontally and steering moves vertically through the four river lanes.
+  - A generated original still background plate
+    (`assets/blood-moon-river-background.png`) supplies the distant cartoon
+    mountains, fog, village, rain, and blood moon. The river remains a separate
+    scrolling foreground layer.
+  - Base speed is modestly faster than 0.5 while retaining the limited right-side
+    field of view.
+  - Horizontal mode uses Up/Down or W/S to change visible lanes. The former
+    Left/Right and A/D bindings remain available as aliases.
+  - Version 0.7 lengthens the course from 120 to 160 while raising base speed,
+    producing a faster-scrolling run that is still roughly 30 seconds clean.
+  - The river foreground is now a static blue layer with no current animation.
+  - Required-ramp barricades are mixed with loose hazards between them. Green
+    ghost hands temporarily slow a racer without damage; loose rocks and river
+    skeletons cause the same wipeout and 3 damage as a missed ramp.
+  - The CSS placeholder racer was replaced with the transparent generated
+    `assets/jiangshi-canoe-racer.png` sprite.
+  - Version 0.8 replaces the CSS ramp, log, skeleton, and ghost-hand shapes with
+    matching transparent illustrated sprites:
+    - `assets/river-hazard-ramp.png`
+    - `assets/river-hazard-log.png`
+    - `assets/river-hazard-skeleton.png`
+    - `assets/river-hazard-hands.png`
+  - Version 0.9 doubles course length from 160 to 320, raises forward and
+    steering speed, and spaces full barricades 24–30 progress units apart.
+  - Loose hazards now appear 13–16 units after a ramp instead of 6–8, giving a
+    clear landing/recovery window.
+  - The playable river expands from 50% to 62% of the board height, allowing
+    racers to steer closer to both banks.
+  - The obstacle in the ramp lane is no longer rendered underneath the ramp;
+    each barricade consists of three blocked lanes and one visually clean ramp.
+  - Version 0.10 increases course length by another 50%, from 320 to 480.
+  - The first ramp now begins at progress 40 instead of 18, giving enough time
+    to cross all four lanes even when it spawns opposite the rider.
+  - Later ramp barricades are spaced 36–44 units apart instead of 24–30.
+  - Loose hazards appear 18–22 units after a ramp, preserving a longer landing
+    and recovery window.
+  - Version 0.11 corrects the mid-course density problem: course length is now
+    720, full ramp barricades are 52–64 units apart, and exactly one loose hazard
+    appears between barricades.
+  - Loose hazards appear 24–30 units after a ramp, leaving at least 22 units
+    before the earliest possible next ramp.
+  - The board header displays `720-distance course`, making stale/short state
+    immediately visible after opening or resetting the game.
+  - Version 0.12 removes the on-screen Up, Down, and Straight buttons. River
+    steering is keyboard-only: Up/Down or W/S, with Left/Right and A/D aliases.
+  - Each obstacle row spans the river and has one ramp lane. Catching the ramp
+    jumps the whole barricade; missing it causes a wipeout, slowdown, lost
+    distance, and `3` damage.
   - Finish order is tracked automatically.
   - **Chat Results** posts placement, hit count, and damage totals.
 - GM client is authoritative for the live race loop.

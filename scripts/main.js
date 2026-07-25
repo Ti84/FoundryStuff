@@ -14,10 +14,10 @@ const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => 
 })[char]);
 
 const riverObstacleTypes = {
-  rock: { label: "Rock", icon: "ROCK" },
-  log: { label: "Log", icon: "LOG" },
-  ghost: { label: "Ghost Hands", icon: "GRAB" },
-  lantern: { label: "Broken Lantern", icon: "LAMP" }
+  rock: { label: "Jagged rocks", icon: "ROCKS" },
+  log: { label: "Fallen log", icon: "LOG" },
+  ghost: { label: "Grasping ghost hands", icon: "HANDS" },
+  skeleton: { label: "River skeleton", icon: "BONES" }
 };
 
 const riverMoves = {
@@ -669,16 +669,17 @@ class RiverRaceGame {
   }
 
   defaultState() {
-    const length = 120;
-    const lanes = 5;
+    const length = 720;
+    const lanes = 4;
 
     return {
+      courseVersion: 8,
       raceId: Date.now(),
       status: "lobby",
       tick: 0,
       lanes,
       length,
-      viewport: 34,
+      viewport: 27,
       damagePerHit: 3,
       players: [],
       hazards: this.generateCourse(length, lanes),
@@ -718,6 +719,10 @@ class RiverRaceGame {
 
   syncState(state) {
     if (!state) return;
+    if (state.courseVersion !== 8) {
+      this.state = this.defaultState();
+      return;
+    }
     this.state = {
       ...this.defaultState(),
       ...deepClone(state)
@@ -782,22 +787,34 @@ class RiverRaceGame {
 
   generateCourse(length, lanes) {
     const hazards = [];
-    const types = Object.keys(riverObstacleTypes);
+    const gateTypes = ["rock", "log", "skeleton"];
+    const looseTypes = ["ghost", "rock", "skeleton"];
+    let previousRampLane = -1;
 
-    for (let y = 12; y < length - 4; y += 6 + Math.floor(Math.random() * 5)) {
-      const rampLane = Math.floor(Math.random() * lanes);
-      hazards.push({ id: `ramp-${y}-${rampLane}`, type: "ramp", lane: rampLane, y });
+    for (let y = 52; y < length - 12; y += 52 + Math.floor(Math.random() * 13)) {
+      let rampLane = Math.floor(Math.random() * lanes);
+      while (rampLane === previousRampLane) rampLane = Math.floor(Math.random() * lanes);
+      previousRampLane = rampLane;
+      const type = gateTypes[Math.floor(Math.random() * gateTypes.length)];
+      const gateId = `gate-${y}`;
 
-      const blockedLanes = new Set();
-      while (blockedLanes.size < Math.min(2 + Math.floor(Math.random() * 2), lanes - 1)) {
-        const lane = Math.floor(Math.random() * lanes);
-        if (lane !== rampLane) blockedLanes.add(lane);
+      // One clean ramp lane remains open while the other three form a barricade.
+      hazards.push({ id: `ramp-${y}-${rampLane}`, type: "ramp", lane: rampLane, y, gateId });
+      for (let lane = 0; lane < lanes; lane += 1) {
+        if (lane === rampLane) continue;
+        hazards.push({ id: `${type}-${y}-${lane}`, type, lane, y, gateId });
       }
 
-      for (const lane of blockedLanes) {
-        const type = types[Math.floor(Math.random() * types.length)];
-        hazards.push({ id: `${type}-${y}-${lane}`, type, lane, y });
-      }
+      const looseY = y + 24 + Math.floor(Math.random() * 7);
+      const looseLane = Math.floor(Math.random() * lanes);
+      const looseType = looseTypes[Math.floor(Math.random() * looseTypes.length)];
+      hazards.push({
+        id: `loose-${looseType}-${looseY}-${looseLane}`,
+        type: looseType,
+        lane: looseLane,
+        y: looseY,
+        standalone: true
+      });
     }
 
     return hazards;
@@ -893,7 +910,7 @@ class RiverRaceGame {
       lane,
       laneX: lane,
       progress: 0,
-      speed: 0.92 + Math.random() * 0.12,
+      speed: 0.9 + Math.random() * 0.08,
       input: 0,
       hits: 0,
       damage: 0,
@@ -901,9 +918,14 @@ class RiverRaceGame {
       finishPlace: null,
       invulnerableUntil: 0,
       boostedUntil: 0,
+      airborneUntil: 0,
+      wipeoutUntil: 0,
+      slowedUntil: 0,
+      jumps: 0,
+      snares: 0,
       collidedHazards: []
     });
-    this.state.log.push(`${playerData.name} grabs a plank and joins the crossing.`);
+    this.state.log.push(`${playerData.name} hops onto a tiny spirit sled at the river's edge.`);
   }
 
   startRace() {
@@ -924,10 +946,15 @@ class RiverRaceGame {
       player.finishPlace = null;
       player.invulnerableUntil = 0;
       player.boostedUntil = 0;
+      player.airborneUntil = 0;
+      player.wipeoutUntil = 0;
+      player.slowedUntil = 0;
+      player.jumps = 0;
+      player.snares = 0;
       player.collidedHazards = [];
     });
     this.state.finishOrder = [];
-    this.state.log.push("The current catches every plank at once. Steer with arrows or the buttons. Miss the ramps, meet the river.");
+    this.state.log.push("The haunted slope gives way beneath every sled. Line up with each ramp—the barricades span the whole river.");
     this.startLoop();
   }
 
@@ -943,7 +970,7 @@ class RiverRaceGame {
 
     this.tickTimer = globalThis.setInterval(() => {
       void this.tickRace();
-    }, 120);
+    }, 150);
   }
 
   stopLoop() {
@@ -984,7 +1011,9 @@ class RiverRaceGame {
     player.lane = Math.round(player.laneX);
 
     const boosted = this.state.tick < player.boostedUntil;
-    const speed = player.speed + (boosted ? 0.48 : 0);
+    const wipingOut = this.state.tick < player.wipeoutUntil;
+    const slowed = this.state.tick < (player.slowedUntil ?? 0);
+    const speed = (player.speed + (boosted ? 0.22 : 0)) * (wipingOut ? 0.42 : slowed ? 0.62 : 1);
     player.progress = Math.min(this.state.length, player.progress + speed);
 
     const nearbyHazards = this.state.hazards.filter((hazard) =>
@@ -998,18 +1027,34 @@ class RiverRaceGame {
       player.collidedHazards.push(hazard.id);
 
       if (hazard.type === "ramp") {
-        player.boostedUntil = this.state.tick + 12;
-        notes.push(`${player.name} catches a ramp and skips over a snarling patch of river.`);
+        player.airborneUntil = this.state.tick + 8;
+        player.boostedUntil = this.state.tick + 10;
+        player.jumps = (player.jumps ?? 0) + 1;
+        notes.push(`${player.name} hits the ramp and clears ${this.gateLabel(hazard.gateId)}!`);
         continue;
       }
 
+      if (this.state.tick < (player.airborneUntil ?? 0)) continue;
+      if (hazard.standalone && hazard.type === "ghost") {
+        player.slowedUntil = this.state.tick + 14;
+        player.snares = (player.snares ?? 0) + 1;
+        notes.push(`${player.name} is caught by grasping ghost hands and dragged backward by the current.`);
+        continue;
+      }
       if (this.state.tick < player.invulnerableUntil) continue;
       player.hits += 1;
       player.damage += this.state.damagePerHit;
-      player.invulnerableUntil = this.state.tick + 10;
-      player.speed = Math.max(0.72, player.speed - 0.03);
-      notes.push(`${player.name} hits ${riverObstacleTypes[hazard.type].label.toLowerCase()} for ${this.state.damagePerHit} damage.`);
+      player.invulnerableUntil = this.state.tick + 12;
+      player.wipeoutUntil = this.state.tick + 8;
+      player.progress = Math.max(0, player.progress - 2.2);
+      player.speed = Math.max(0.76, player.speed - 0.025);
+      notes.push(`${player.name} misses the ramp and wipes out on ${riverObstacleTypes[hazard.type].label.toLowerCase()} for ${this.state.damagePerHit} damage.`);
     }
+  }
+
+  gateLabel(gateId) {
+    const obstacle = this.state.hazards.find((hazard) => hazard.gateId === gateId && hazard.type !== "ramp");
+    return obstacle ? riverObstacleTypes[obstacle.type].label.toLowerCase() : "the obstacle";
   }
 
   checkFinish() {
@@ -1109,7 +1154,7 @@ class RiverRaceGame {
           <section class="sog-river-board-wrap">
             <div class="sog-river-meta">
               <strong>${escapeHtml(statusLabel)}</strong>
-              <span>${this.state.damagePerHit} damage per obstacle hit</span>
+              <span>${this.state.length}-distance course · ramps clear barricades · misses deal ${this.state.damagePerHit} damage</span>
             </div>
             ${this.renderBoard()}
           </section>
@@ -1136,16 +1181,17 @@ class RiverRaceGame {
 
   renderBoard() {
     const lead = Math.max(0, ...this.state.players.map((player) => player.progress));
-    const camera = clamp(lead - 8, 0, Math.max(0, this.state.length - this.state.viewport));
+    const camera = clamp(lead - 7, 0, Math.max(0, this.state.length - this.state.viewport));
     const visibleHazards = this.state.hazards.filter((hazard) => hazard.y >= camera && hazard.y <= camera + this.state.viewport);
-    const finishTop = this.percentFromProgress(this.state.length, camera);
+    const finishLeft = this.percentFromProgress(this.state.length, camera);
 
     return `
       <div class="sog-river-board sog-river-live" style="--lane-count: ${this.state.lanes};">
         <div class="sog-river-current" aria-hidden="true"></div>
         <div class="sog-river-bank left" aria-hidden="true"></div>
         <div class="sog-river-bank right" aria-hidden="true"></div>
-        ${finishTop >= -8 && finishTop <= 108 ? `<div class="sog-river-finish" style="top: ${finishTop}%;">FAR BANK</div>` : ""}
+        <div class="sog-river-horizon-fog" aria-hidden="true"></div>
+        ${finishLeft >= -8 && finishLeft <= 108 ? `<div class="sog-river-finish" style="left: ${finishLeft}%;">FAR BANK</div>` : ""}
         ${visibleHazards.map((hazard) => this.renderHazard(hazard, camera)).join("")}
         ${this.state.players.map((player) => this.renderRacer(player, camera)).join("")}
       </div>
@@ -1153,43 +1199,51 @@ class RiverRaceGame {
   }
 
   percentFromProgress(progress, camera) {
-    return 96 - ((progress - camera) / this.state.viewport) * 92;
+    return 16 + ((progress - camera) / this.state.viewport) * 80;
   }
 
   lanePercent(laneX) {
-    const width = 100 / this.state.lanes;
-    return width * laneX + width / 2;
+    const courseTop = 34;
+    const courseHeight = 62;
+    const laneHeight = courseHeight / this.state.lanes;
+    return courseTop + laneHeight * laneX + laneHeight / 2;
+  }
+
+  assetUrl(fileName) {
+    return this.canUseFoundryDialog()
+      ? `modules/${MODULE_ID}/assets/${fileName}`
+      : `./assets/${fileName}`;
   }
 
   renderHazard(hazard, camera) {
-    const top = this.percentFromProgress(hazard.y, camera);
-    const left = this.lanePercent(hazard.lane);
+    const left = this.percentFromProgress(hazard.y, camera);
+    const top = this.lanePercent(hazard.lane);
     const label = hazard.type === "ramp" ? "RAMP" : riverObstacleTypes[hazard.type].icon;
 
     return `
-      <span class="sog-river-hazard is-${hazard.type}" style="left: ${left}%; top: ${top}%;">
-        ${label}
+      <span class="sog-river-hazard is-${hazard.type}" title="${escapeHtml(hazard.type === "ramp" ? "Jump ramp" : riverObstacleTypes[hazard.type].label)}" style="left: ${left}%; top: ${top}%;">
+        <span class="sog-hazard-sprite" aria-hidden="true"></span>
+        <em>${label}</em>
       </span>
     `;
   }
 
   renderRacer(player, camera) {
-    const initials = player.name
-      .split(/\s+/)
-      .map((part) => part[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase();
-    const left = this.lanePercent(player.laneX ?? player.lane);
-    const top = player.finished ? 3 + (player.finishPlace ?? 1) * 4 : this.percentFromProgress(player.progress, camera);
+    const left = player.finished ? 84 + (player.finishPlace ?? 1) * 2 : this.percentFromProgress(player.progress, camera);
+    const top = this.lanePercent(player.laneX ?? player.lane);
     const classes = ["sog-river-racer"];
     if (this.state.tick < player.invulnerableUntil) classes.push("is-hit");
     if (this.state.tick < player.boostedUntil) classes.push("is-boosted");
+    if (this.state.tick < (player.airborneUntil ?? 0)) classes.push("is-airborne");
+    if (this.state.tick < (player.wipeoutUntil ?? 0)) classes.push("is-wipeout");
+    if (this.state.tick < (player.slowedUntil ?? 0)) classes.push("is-slowed");
     if (player.finished) classes.push("is-finished");
 
     return `
       <span class="${classes.join(" ")}" title="${escapeHtml(player.name)}" style="left: ${left}%; top: ${top}%;">
-        ${player.img ? `<img src="${escapeHtml(player.img)}" alt="">` : `<b>${escapeHtml(initials)}</b>`}
+        <span class="sog-canoe-sprite sog-ghost-sled" aria-hidden="true">
+          <img src="${this.assetUrl("jiangshi-canoe-racer.png")}" alt="">
+        </span>
         <i>${escapeHtml(player.name.split(/\s+/)[0])}</i>
       </span>
     `;
@@ -1200,13 +1254,8 @@ class RiverRaceGame {
 
     return `
       <section class="sog-river-controls">
-        <h3>Steer</h3>
-        <div class="sog-river-move-grid">
-          <button type="button" data-river-steer="-1" ${disabled ? "disabled" : ""}>Steer Left</button>
-          <button type="button" data-river-steer="1" ${disabled ? "disabled" : ""}>Steer Right</button>
-          <button type="button" data-river-steer="0" ${disabled ? "disabled" : ""}>Straight</button>
-        </div>
-        <p class="sog-viewer-note">Arrow keys also steer while this window is open.</p>
+        <h3>Keyboard Steering</h3>
+        <p class="sog-viewer-note">${disabled ? "Join the race and wait for the GM to start." : "Use ↑ ↓ or W S. Arrow Left/Right and A/D also work."}</p>
       </section>
     `;
   }
@@ -1247,7 +1296,7 @@ class RiverRaceGame {
           <div class="sog-river-standing">
             <span>${player.finishPlace ? `${player.finishPlace}. ` : ""}${escapeHtml(player.name)}</span>
             <strong>${Math.floor(player.progress)}/${this.state.length}</strong>
-            <small>${player.hits} hits, ${player.damage} dmg${player.input < 0 ? ", left" : player.input > 0 ? ", right" : ""}</small>
+            <small>${player.jumps ?? 0} jumps · ${player.snares ?? 0} hand snares · ${player.hits} wipeouts · ${player.damage} dmg${player.input < 0 ? " · up" : player.input > 0 ? " · down" : ""}</small>
           </div>
         `).join("")}
       </section>
@@ -1296,7 +1345,9 @@ class RiverRaceGame {
 
   handleKey(event, pressed) {
     if (!this.element || this.state.status !== "running") return;
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "a" && event.key !== "d") return;
+    const upKeys = ["ArrowUp", "ArrowLeft", "w", "a"];
+    const downKeys = ["ArrowDown", "ArrowRight", "s", "d"];
+    if (!upKeys.includes(event.key) && !downKeys.includes(event.key)) return;
 
     event.preventDefault();
     if (!pressed) {
@@ -1304,7 +1355,7 @@ class RiverRaceGame {
       return;
     }
 
-    this.sendSteer(event.key === "ArrowLeft" || event.key === "a" ? -1 : 1);
+    this.sendSteer(upKeys.includes(event.key) ? -1 : 1);
   }
 
   sendSteer(direction) {
@@ -1317,12 +1368,12 @@ class RiverRaceGame {
   async sendResultToChat() {
     const rows = [...this.state.players]
       .sort((a, b) => (a.finishPlace ?? 999) - (b.finishPlace ?? 999) || b.progress - a.progress)
-      .map((player) => `<li>${escapeHtml(player.finishPlace ? `${player.finishPlace}. ` : "")}${escapeHtml(player.name)}: ${player.hits} hits, ${player.damage} damage</li>`)
+      .map((player) => `<li>${escapeHtml(player.finishPlace ? `${player.finishPlace}. ` : "")}${escapeHtml(player.name)}: ${player.jumps ?? 0} jumps, ${player.snares ?? 0} hand snares, ${player.hits} wipeouts, ${player.damage} damage</li>`)
       .join("");
 
     const content = `
       <h2>Blood-Rain River Race</h2>
-      <p>Obstacle hits deal ${this.state.damagePerHit} damage each unless braced.</p>
+      <p>Racers had to take the ramps to clear each barricade. Wipeouts dealt ${this.state.damagePerHit} damage each.</p>
       <ol>${rows}</ol>
     `;
 
