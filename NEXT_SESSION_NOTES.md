@@ -6,7 +6,7 @@ This is the portable handoff memory for continuing the Season of Ghosts Foundry 
 
 - Repo/module path on this machine: `C:\Users\sc897\OneDrive\Documents\Shane Remote\Personal\PF2E\foundry-modules\season-of-ghosts-minigames`
 - Foundry module id: `season-of-ghosts-minigames`
-- Current module version: `0.12.0`
+- Current module version: `0.12.9`
 - Foundry compatibility: v13 minimum / verified
 - Main logic: `scripts/main.js`
 - Main styles: `styles/minigames.css`
@@ -129,6 +129,41 @@ Behavior:
   - Each obstacle row spans the river and has one ramp lane. Catching the ramp
     jumps the whole barricade; missing it causes a wipeout, slowdown, lost
     distance, and `3` damage.
+  - Version 0.12.1 retunes the PC pacing after the 720-distance course felt too
+    long and too easy on a larger display. The course is now 440 distance, the
+    tick interval is 125ms, base racer speed is about 1.06-1.15 per tick, the
+    viewport is 24, ramp gates spawn every 38-47 distance, and new ramp lanes
+    shift by at most one lane from the previous ramp. This should feel closer
+    to a quick arcade run while staying fair.
+  - The river race window max size was reduced to 1040x720 so high-resolution
+    displays do not make the course feel as spacious.
+  - Version 0.12.2 prompts each player for a display name when they click
+    **Join Crossing**. The prompt defaults to the assigned Foundry character,
+    selected token, or user name, and still keeps the actor/token image when
+    available.
+  - Version 0.12.3 adds procedural spooky-fun arcade music for the river race.
+    It uses WebAudio instead of an asset file, starts with the race, fades out
+    when the race ends/closes/resets, and has a local **Music On/Off** button
+    so each client can mute independently.
+  - Version 0.12.4 replaces the native `prompt()` name entry with an inline
+    **Racer Name** field because the preview/Foundry browser can reject
+    `prompt()`.
+  - Version 0.12.5 speeds the live race loop by 20%, changing the tick interval
+    from 125ms to 100ms.
+  - Version 0.12.6 adds more random loose obstacles between jump gates. Each
+    gate now spawns two loose hazards, with a third about a third of the time.
+    The river course version is now `10` so older saved race state resets.
+  - Version 0.12.7 adds `"socket": true` to `module.json`. This is required for
+    Forge/Foundry clients to reliably receive the module socket events used by
+    **Show To Players** and live race updates.
+  - Version 0.12.8 fixes local/prod music startup by explicitly unlocking and
+    resuming the WebAudio context from user gestures: Join, Start, Music toggle,
+    and steering/key input. It also raises the procedural music master gain.
+  - Version 0.12.9 smooths player-side river race playback. During live racing,
+    the board now updates existing hazard/racer DOM elements instead of
+    rebuilding the full window every tick, and GM socket broadcasts use compact
+    frame packets so Forge players are not receiving the whole course 10 times
+    per second.
   - Finish order is tracked automatically.
   - **Chat Results** posts placement, hit count, and damage totals.
 - GM client is authoritative for the live race loop.
@@ -162,8 +197,8 @@ http://127.0.0.1:8787/dev-test.html
 The dev harness has cache-busting query strings:
 
 ```html
-<link rel="stylesheet" href="./styles/minigames.css?v=0.2.0">
-<script src="./scripts/main.js?v=0.2.0"></script>
+<link rel="stylesheet" href="./styles/minigames.css?v=0.12.9">
+<script src="./scripts/main.js?v=0.12.9"></script>
 ```
 
 Update those when making visible CSS/JS changes.

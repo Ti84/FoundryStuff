@@ -662,24 +662,30 @@ class RiverRaceGame {
     this.element = null;
     this.dialog = null;
     this.tickTimer = null;
+    this.music = null;
+    this.musicTimer = null;
+    this.musicEnabled = true;
     this.keyboardAttached = false;
     this.lastSentDirection = 0;
+    this.renderedStatus = null;
+    this.renderedPlayerCount = null;
+    this.renderedLogCount = 0;
     this.boundKeyDown = (event) => this.handleKey(event, true);
     this.boundKeyUp = (event) => this.handleKey(event, false);
   }
 
   defaultState() {
-    const length = 720;
+    const length = 440;
     const lanes = 4;
 
     return {
-      courseVersion: 8,
+      courseVersion: 10,
       raceId: Date.now(),
       status: "lobby",
       tick: 0,
       lanes,
       length,
-      viewport: 27,
+      viewport: 24,
       damagePerHit: 3,
       players: [],
       hazards: this.generateCourse(length, lanes),
@@ -706,6 +712,22 @@ class RiverRaceGame {
     return deepClone(this.state);
   }
 
+  raceFrameState() {
+    return {
+      courseVersion: this.state.courseVersion,
+      raceId: this.state.raceId,
+      status: this.state.status,
+      tick: this.state.tick,
+      lanes: this.state.lanes,
+      length: this.state.length,
+      viewport: this.state.viewport,
+      damagePerHit: this.state.damagePerHit,
+      players: deepClone(this.state.players),
+      finishOrder: deepClone(this.state.finishOrder),
+      log: this.state.log.slice(-8)
+    };
+  }
+
   getStoredState() {
     if (!this.canUseFoundryDialog() || !globalThis.game?.settings) return null;
 
@@ -719,7 +741,7 @@ class RiverRaceGame {
 
   syncState(state) {
     if (!state) return;
-    if (state.courseVersion !== 8) {
+    if (state.courseVersion !== 10) {
       this.state = this.defaultState();
       return;
     }
@@ -775,6 +797,7 @@ class RiverRaceGame {
 
   close() {
     this.stopLoop();
+    this.stopRaceMusic();
     this.detachKeyboard();
     if (this.dialog) {
       const dialog = this.dialog;
@@ -791,9 +814,11 @@ class RiverRaceGame {
     const looseTypes = ["ghost", "rock", "skeleton"];
     let previousRampLane = -1;
 
-    for (let y = 52; y < length - 12; y += 52 + Math.floor(Math.random() * 13)) {
-      let rampLane = Math.floor(Math.random() * lanes);
-      while (rampLane === previousRampLane) rampLane = Math.floor(Math.random() * lanes);
+    for (let y = 38; y < length - 12; y += 38 + Math.floor(Math.random() * 10)) {
+      const rampOptions = previousRampLane < 0
+        ? Array.from({ length: lanes }, (_value, lane) => lane)
+        : [previousRampLane - 1, previousRampLane, previousRampLane + 1].filter((lane) => lane >= 0 && lane < lanes);
+      const rampLane = rampOptions[Math.floor(Math.random() * rampOptions.length)];
       previousRampLane = rampLane;
       const type = gateTypes[Math.floor(Math.random() * gateTypes.length)];
       const gateId = `gate-${y}`;
@@ -805,16 +830,24 @@ class RiverRaceGame {
         hazards.push({ id: `${type}-${y}-${lane}`, type, lane, y, gateId });
       }
 
-      const looseY = y + 24 + Math.floor(Math.random() * 7);
-      const looseLane = Math.floor(Math.random() * lanes);
-      const looseType = looseTypes[Math.floor(Math.random() * looseTypes.length)];
-      hazards.push({
-        id: `loose-${looseType}-${looseY}-${looseLane}`,
-        type: looseType,
-        lane: looseLane,
-        y: looseY,
-        standalone: true
-      });
+      const looseCount = 2 + (Math.random() < 0.35 ? 1 : 0);
+      const looseYs = [];
+      for (let index = 0; index < looseCount; index += 1) {
+        const baseOffset = 13 + index * 9;
+        const looseY = Math.min(y + 34, y + baseOffset + Math.floor(Math.random() * 5));
+        if (looseYs.some((existingY) => Math.abs(existingY - looseY) < 5)) continue;
+        looseYs.push(looseY);
+
+        const looseLane = Math.floor(Math.random() * lanes);
+        const looseType = looseTypes[Math.floor(Math.random() * looseTypes.length)];
+        hazards.push({
+          id: `loose-${looseType}-${looseY}-${looseLane}-${index}`,
+          type: looseType,
+          lane: looseLane,
+          y: looseY,
+          standalone: true
+        });
+      }
     }
 
     return hazards;
@@ -850,6 +883,18 @@ class RiverRaceGame {
     };
   }
 
+  getNamedJoinData() {
+    const playerData = this.getJoinData();
+    const defaultName = playerData.name || playerData.userName || "River Racer";
+    const enteredName = this.element?.querySelector('[data-river-name]')?.value;
+
+    const name = enteredName?.trim() || defaultName;
+    return {
+      ...playerData,
+      name: name.slice(0, 32)
+    };
+  }
+
   submitCommand(command) {
     if (this.canControlRace()) {
       void this.applyCommand(command, this.currentUserId());
@@ -874,6 +919,7 @@ class RiverRaceGame {
       this.startRace();
     } else if (command.type === "reset") {
       this.stopLoop();
+      this.stopRaceMusic();
       this.state = this.defaultState();
     } else if (command.type === "show") {
       this.broadcastOpenToPlayers();
@@ -910,7 +956,7 @@ class RiverRaceGame {
       lane,
       laneX: lane,
       progress: 0,
-      speed: 0.9 + Math.random() * 0.08,
+      speed: 1.06 + Math.random() * 0.09,
       input: 0,
       hits: 0,
       damage: 0,
@@ -956,6 +1002,7 @@ class RiverRaceGame {
     this.state.finishOrder = [];
     this.state.log.push("The haunted slope gives way beneath every sled. Line up with each ramp—the barricades span the whole river.");
     this.startLoop();
+    this.startRaceMusic();
   }
 
   setPlayerInput(userId, direction) {
@@ -970,12 +1017,169 @@ class RiverRaceGame {
 
     this.tickTimer = globalThis.setInterval(() => {
       void this.tickRace();
-    }, 150);
+    }, 100);
   }
 
   stopLoop() {
     globalThis.clearInterval(this.tickTimer);
     this.tickTimer = null;
+  }
+
+  ensureMusic() {
+    if (!this.musicEnabled) return null;
+    if (this.music?.context) return this.music;
+
+    const AudioContextClass = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!AudioContextClass) return null;
+
+    const context = new AudioContextClass();
+    const master = context.createGain();
+    master.gain.value = 0.09;
+    master.connect(context.destination);
+
+    this.music = {
+      context,
+      master,
+      step: 0,
+      tempo: 148
+    };
+    return this.music;
+  }
+
+  unlockRaceMusic() {
+    const music = this.ensureMusic();
+    if (!music) return null;
+
+    music.context.resume?.().catch(() => {});
+    const now = music.context.currentTime;
+    music.master.gain.cancelScheduledValues(now);
+    music.master.gain.setTargetAtTime(this.musicEnabled ? 0.09 : 0.0001, now, 0.04);
+    return music;
+  }
+
+  startRaceMusic() {
+    if (!this.musicEnabled || this.musicTimer || this.state.status !== "running") return;
+
+    const music = this.unlockRaceMusic();
+    if (!music) return;
+
+    if (music.context.state === "suspended") {
+      music.context.resume?.().then(() => this.beginRaceMusicLoop()).catch(() => {});
+      return;
+    }
+
+    this.beginRaceMusicLoop();
+  }
+
+  beginRaceMusicLoop() {
+    if (!this.music || this.musicTimer || !this.musicEnabled || this.state.status !== "running") return;
+
+    const music = this.music;
+    const now = music.context.currentTime;
+    music.master.gain.cancelScheduledValues(now);
+    music.master.gain.setTargetAtTime(0.09, now, 0.04);
+    const stepMs = (60000 / music.tempo) / 2;
+    this.playMusicStep();
+    this.musicTimer = globalThis.setInterval(() => this.playMusicStep(), stepMs);
+  }
+
+  stopRaceMusic() {
+    globalThis.clearInterval(this.musicTimer);
+    this.musicTimer = null;
+    if (!this.music) return;
+
+    const now = this.music.context.currentTime;
+    this.music.master.gain.cancelScheduledValues(now);
+    this.music.master.gain.setTargetAtTime(0.0001, now, 0.04);
+  }
+
+  toggleRaceMusic() {
+    this.musicEnabled = !this.musicEnabled;
+    if (this.musicEnabled && this.music) {
+      const now = this.music.context.currentTime;
+      this.music.master.gain.cancelScheduledValues(now);
+      this.music.master.gain.setTargetAtTime(0.09, now, 0.04);
+    }
+
+    if (this.musicEnabled && this.state.status === "running") {
+      this.unlockRaceMusic();
+      this.startRaceMusic();
+    } else {
+      this.stopRaceMusic();
+    }
+    this.update();
+  }
+
+  playMusicStep() {
+    const music = this.ensureMusic();
+    if (!music) return;
+
+    const context = music.context;
+    const now = context.currentTime;
+    const step = music.step % 32;
+    const melody = [659, 784, 880, 784, 659, 587, 523, 587, 659, 784, 988, 880, 784, 659, 587, 523];
+    const bass = [110, 110, 147, 147, 131, 131, 98, 98];
+    const spooky = [0, 3, 6, 3, 0, 10, 6, 3];
+
+    if (step % 2 === 0) {
+      this.playTone(bass[(step / 2) % bass.length], now, 0.16, "square", 0.13);
+    }
+
+    const melodyNote = melody[step % melody.length] * (spooky[step % spooky.length] === 10 ? 0.5 : 1);
+    this.playTone(melodyNote, now + 0.012, step % 4 === 3 ? 0.18 : 0.11, "triangle", 0.09);
+
+    if (step % 4 === 1) {
+      this.playTone(1318, now + 0.02, 0.07, "square", 0.035);
+    }
+
+    if (step % 2 === 1) {
+      this.playNoise(now + 0.018, 0.045, 0.045);
+    }
+
+    music.step += 1;
+  }
+
+  playTone(frequency, startTime, duration, type = "square", volume = 0.08) {
+    if (!this.music) return;
+
+    const context = this.music.context;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, startTime);
+    oscillator.detune.setValueAtTime(type === "triangle" ? -8 : 0, startTime);
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.exponentialRampToValueAtTime(volume, startTime + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+    oscillator.connect(gain);
+    gain.connect(this.music.master);
+    oscillator.start(startTime);
+    oscillator.stop(startTime + duration + 0.03);
+  }
+
+  playNoise(startTime, duration, volume = 0.04) {
+    if (!this.music) return;
+
+    const context = this.music.context;
+    const sampleCount = Math.floor(context.sampleRate * duration);
+    const buffer = context.createBuffer(1, sampleCount, context.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let index = 0; index < sampleCount; index += 1) {
+      data[index] = (Math.random() * 2 - 1) * (1 - index / sampleCount);
+    }
+
+    const noise = context.createBufferSource();
+    const filter = context.createBiquadFilter();
+    const gain = context.createGain();
+    noise.buffer = buffer;
+    filter.type = "highpass";
+    filter.frequency.value = 2200;
+    gain.gain.setValueAtTime(volume, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.music.master);
+    noise.start(startTime);
   }
 
   async tickRace() {
@@ -996,9 +1200,10 @@ class RiverRaceGame {
 
     if (this.state.status === "finished") {
       this.stopLoop();
+      this.stopRaceMusic();
       await this.commitSharedState();
     } else {
-      this.broadcastSharedState({ persist: this.state.tick % 10 === 0 });
+      this.broadcastSharedState({ persist: this.state.tick % 10 === 0, compact: true });
     }
     this.update();
   }
@@ -1013,7 +1218,7 @@ class RiverRaceGame {
     const boosted = this.state.tick < player.boostedUntil;
     const wipingOut = this.state.tick < player.wipeoutUntil;
     const slowed = this.state.tick < (player.slowedUntil ?? 0);
-    const speed = (player.speed + (boosted ? 0.22 : 0)) * (wipingOut ? 0.42 : slowed ? 0.62 : 1);
+    const speed = (player.speed + (boosted ? 0.28 : 0)) * (wipingOut ? 0.42 : slowed ? 0.62 : 1);
     player.progress = Math.min(this.state.length, player.progress + speed);
 
     const nearbyHazards = this.state.hazards.filter((hazard) =>
@@ -1046,7 +1251,7 @@ class RiverRaceGame {
       player.damage += this.state.damagePerHit;
       player.invulnerableUntil = this.state.tick + 12;
       player.wipeoutUntil = this.state.tick + 8;
-      player.progress = Math.max(0, player.progress - 2.2);
+      player.progress = Math.max(0, player.progress - 1.8);
       player.speed = Math.max(0.76, player.speed - 0.025);
       notes.push(`${player.name} misses the ramp and wipes out on ${riverObstacleTypes[hazard.type].label.toLowerCase()} for ${this.state.damagePerHit} damage.`);
     }
@@ -1074,15 +1279,16 @@ class RiverRaceGame {
     }
   }
 
-  broadcastSharedState({ persist = false } = {}) {
-    const state = this.sharedState();
+  broadcastSharedState({ persist = false, compact = false } = {}) {
+    const fullState = persist ? this.sharedState() : null;
+    const state = compact ? this.raceFrameState() : (fullState ?? this.sharedState());
     if (persist && this.canUseFoundryDialog() && globalThis.game?.user?.isGM) {
-      void globalThis.game.settings.set(MODULE_ID, RIVER_RACE_STATE_SETTING, state);
+      void globalThis.game.settings.set(MODULE_ID, RIVER_RACE_STATE_SETTING, fullState);
     }
 
     if (this.canUseFoundryDialog() && globalThis.game?.user?.isGM) {
       globalThis.game.socket?.emit(SOCKET_NAME, {
-        type: "riverRaceState",
+        type: compact ? "riverRaceFrame" : "riverRaceState",
         sender: globalThis.game.user.id,
         state
       });
@@ -1116,14 +1322,170 @@ class RiverRaceGame {
   receiveSharedState(state) {
     this.syncState(state);
     if (this.canControlRace() && this.state.status === "running") this.startLoop();
-    if (this.state.status !== "running") this.stopLoop();
+    if (this.state.status === "running") {
+      this.startRaceMusic();
+    } else {
+      this.stopLoop();
+      this.stopRaceMusic();
+    }
     this.update();
   }
 
-  update() {
+  receiveRaceFrame(frame) {
+    if (!frame || frame.courseVersion !== 10) return;
+    if (this.state.raceId !== frame.raceId || this.state.hazards.length <= 0) {
+      return;
+    }
+
+    this.state = {
+      ...this.state,
+      status: frame.status,
+      tick: frame.tick,
+      lanes: frame.lanes,
+      length: frame.length,
+      viewport: frame.viewport,
+      damagePerHit: frame.damagePerHit,
+      players: deepClone(frame.players),
+      finishOrder: deepClone(frame.finishOrder),
+      log: deepClone(frame.log)
+    };
+
+    if (this.state.status === "running") {
+      this.startRaceMusic();
+    } else {
+      this.stopLoop();
+      this.stopRaceMusic();
+    }
+    this.update();
+  }
+
+  update({ force = false } = {}) {
     if (!this.element) return;
+    const needsFullRender = force ||
+      this.renderedStatus !== this.state.status ||
+      this.renderedPlayerCount !== this.state.players.length ||
+      !this.element.querySelector(".sog-river-board");
+
+    if (!needsFullRender && this.state.status === "running") {
+      this.updateRunningView();
+      return;
+    }
+
     this.element.innerHTML = this.render();
+    this.renderedStatus = this.state.status;
+    this.renderedPlayerCount = this.state.players.length;
+    this.renderedLogCount = this.state.log.length;
     this.activateListeners();
+  }
+
+  updateRunningView() {
+    const board = this.element.querySelector(".sog-river-board");
+    if (!board) {
+      this.update({ force: true });
+      return;
+    }
+
+    this.updateRiverBoardDom(board);
+
+    if (this.state.tick % 5 === 0) {
+      this.replaceSection(".sog-river-standings", this.renderStandings());
+    }
+
+    if (this.renderedLogCount !== this.state.log.length) {
+      this.replaceSection(".sog-river-log", `
+        <section class="sog-log sog-river-log" aria-live="polite">
+          ${this.state.log.slice(-5).map((entry) => `<p>${escapeHtml(entry)}</p>`).join("")}
+        </section>
+      `);
+      this.renderedLogCount = this.state.log.length;
+    }
+  }
+
+  updateRiverBoardDom(board) {
+    const lead = Math.max(0, ...this.state.players.map((player) => player.progress));
+    const camera = clamp(lead - 7, 0, Math.max(0, this.state.length - this.state.viewport));
+    const visibleHazards = this.state.hazards.filter((hazard) => hazard.y >= camera && hazard.y <= camera + this.state.viewport);
+    const visibleHazardIds = new Set(visibleHazards.map((hazard) => hazard.id));
+
+    board.style.setProperty("--lane-count", this.state.lanes);
+
+    const finishLeft = this.percentFromProgress(this.state.length, camera);
+    this.syncFinishElement(board, finishLeft);
+    this.syncHazardElements(board, visibleHazards, visibleHazardIds, camera);
+    this.syncRacerElements(board, camera);
+  }
+
+  syncFinishElement(board, finishLeft) {
+    let finish = board.querySelector("[data-river-finish]");
+    if (finishLeft < -8 || finishLeft > 108) {
+      finish?.remove();
+      return;
+    }
+
+    if (!finish) {
+      finish = this.htmlToElement(`<div class="sog-river-finish" data-river-finish>FAR BANK</div>`);
+      board.appendChild(finish);
+    }
+    finish.style.left = `${finishLeft}%`;
+  }
+
+  syncHazardElements(board, visibleHazards, visibleHazardIds, camera) {
+    board.querySelectorAll("[data-river-hazard]").forEach((element) => {
+      if (!visibleHazardIds.has(element.dataset.riverHazard)) element.remove();
+    });
+
+    const existing = new Map(
+      [...board.querySelectorAll("[data-river-hazard]")].map((element) => [element.dataset.riverHazard, element])
+    );
+
+    visibleHazards.forEach((hazard) => {
+      const fresh = this.htmlToElement(this.renderHazard(hazard, camera));
+      const current = existing.get(hazard.id);
+      if (!current) {
+        board.appendChild(fresh);
+        return;
+      }
+      current.className = fresh.className;
+      current.style.cssText = fresh.style.cssText;
+      current.title = fresh.title;
+    });
+  }
+
+  syncRacerElements(board, camera) {
+    const racerIds = new Set(this.state.players.map((player) => player.userId));
+    board.querySelectorAll("[data-river-racer]").forEach((element) => {
+      if (!racerIds.has(element.dataset.riverRacer)) element.remove();
+    });
+
+    const existing = new Map(
+      [...board.querySelectorAll("[data-river-racer]")].map((element) => [element.dataset.riverRacer, element])
+    );
+
+    this.state.players.forEach((player) => {
+      const fresh = this.htmlToElement(this.renderRacer(player, camera));
+      const current = existing.get(player.userId);
+      if (!current) {
+        board.appendChild(fresh);
+        return;
+      }
+      current.className = fresh.className;
+      current.style.cssText = fresh.style.cssText;
+      current.title = fresh.title;
+      current.querySelector("i")?.replaceWith(fresh.querySelector("i"));
+    });
+  }
+
+  replaceSection(selector, html) {
+    const current = this.element?.querySelector(selector);
+    if (!current) return;
+    const replacement = this.htmlToElement(html);
+    current.replaceWith(replacement);
+  }
+
+  htmlToElement(html) {
+    const template = document.createElement("template");
+    template.innerHTML = html.trim();
+    return template.content.firstElementChild;
   }
 
   render() {
@@ -1131,6 +1493,7 @@ class RiverRaceGame {
     const currentPlayer = this.playerForUser();
     const isJoined = Boolean(currentPlayer);
     const canJoin = this.state.status === "lobby" && !isJoined;
+    const joinDefaultName = this.getJoinData().name || "River Racer";
     const statusLabel = this.state.status === "lobby"
       ? "Waiting for racers"
       : this.state.status === "running"
@@ -1146,6 +1509,7 @@ class RiverRaceGame {
           </div>
           <div class="sog-header-controls">
             ${canControl && this.canUseFoundryDialog() ? `<button type="button" data-river-control="show">Show To Players</button>` : ""}
+            <button type="button" data-river-control="music">${this.musicEnabled ? "Music On" : "Music Off"}</button>
             <button type="button" class="sog-icon-button" data-river-control="close" aria-label="Close">x</button>
           </div>
         </header>
@@ -1161,7 +1525,13 @@ class RiverRaceGame {
 
           <aside class="sog-river-panel">
             <section class="sog-river-join">
-              ${canJoin ? `<button type="button" data-river-control="join">Join Crossing</button>` : ""}
+              ${canJoin ? `
+                <label class="sog-river-name">
+                  <span>Racer Name</span>
+                  <input type="text" data-river-name maxlength="32" value="${escapeHtml(joinDefaultName)}">
+                </label>
+                <button type="button" data-river-control="join">Join Crossing</button>
+              ` : ""}
               ${isJoined ? `<p class="sog-viewer-note">You are riding as ${escapeHtml(currentPlayer.name)}</p>` : ""}
               ${!isJoined && !canJoin ? `<p class="sog-viewer-note">Watching the crossing</p>` : ""}
             </section>
@@ -1191,7 +1561,7 @@ class RiverRaceGame {
         <div class="sog-river-bank left" aria-hidden="true"></div>
         <div class="sog-river-bank right" aria-hidden="true"></div>
         <div class="sog-river-horizon-fog" aria-hidden="true"></div>
-        ${finishLeft >= -8 && finishLeft <= 108 ? `<div class="sog-river-finish" style="left: ${finishLeft}%;">FAR BANK</div>` : ""}
+        ${finishLeft >= -8 && finishLeft <= 108 ? `<div class="sog-river-finish" data-river-finish style="left: ${finishLeft}%;">FAR BANK</div>` : ""}
         ${visibleHazards.map((hazard) => this.renderHazard(hazard, camera)).join("")}
         ${this.state.players.map((player) => this.renderRacer(player, camera)).join("")}
       </div>
@@ -1221,7 +1591,7 @@ class RiverRaceGame {
     const label = hazard.type === "ramp" ? "RAMP" : riverObstacleTypes[hazard.type].icon;
 
     return `
-      <span class="sog-river-hazard is-${hazard.type}" title="${escapeHtml(hazard.type === "ramp" ? "Jump ramp" : riverObstacleTypes[hazard.type].label)}" style="left: ${left}%; top: ${top}%;">
+      <span class="sog-river-hazard is-${hazard.type}" data-river-hazard="${escapeHtml(hazard.id)}" title="${escapeHtml(hazard.type === "ramp" ? "Jump ramp" : riverObstacleTypes[hazard.type].label)}" style="left: ${left}%; top: ${top}%;">
         <span class="sog-hazard-sprite" aria-hidden="true"></span>
         <em>${label}</em>
       </span>
@@ -1240,7 +1610,7 @@ class RiverRaceGame {
     if (player.finished) classes.push("is-finished");
 
     return `
-      <span class="${classes.join(" ")}" title="${escapeHtml(player.name)}" style="left: ${left}%; top: ${top}%;">
+      <span class="${classes.join(" ")}" data-river-racer="${escapeHtml(player.userId)}" title="${escapeHtml(player.name)}" style="left: ${left}%; top: ${top}%;">
         <span class="sog-canoe-sprite sog-ghost-sled" aria-hidden="true">
           <img src="${this.assetUrl("jiangshi-canoe-racer.png")}" alt="">
         </span>
@@ -1306,13 +1676,21 @@ class RiverRaceGame {
   activateListeners() {
     this.attachKeyboard();
     this.element.querySelector('[data-river-control="close"]')?.addEventListener("click", () => this.close());
+    this.element.querySelector('[data-river-control="music"]')?.addEventListener("click", () => {
+      this.unlockRaceMusic();
+      this.toggleRaceMusic();
+    });
     this.element.querySelector('[data-river-control="join"]')?.addEventListener("click", () => {
-      this.submitCommand({ type: "join", player: this.getJoinData() });
+      const player = this.getNamedJoinData();
+      if (!player) return;
+      this.unlockRaceMusic();
+      this.submitCommand({ type: "join", player });
     });
     this.element.querySelector('[data-river-control="show"]')?.addEventListener("click", () => {
       this.submitCommand({ type: "show" });
     });
     this.element.querySelector('[data-river-control="start"]')?.addEventListener("click", () => {
+      this.unlockRaceMusic();
       this.submitCommand({ type: "start" });
     });
     this.element.querySelector('[data-river-control="reset"]')?.addEventListener("click", () => {
@@ -1350,6 +1728,7 @@ class RiverRaceGame {
     if (!upKeys.includes(event.key) && !downKeys.includes(event.key)) return;
 
     event.preventDefault();
+    this.unlockRaceMusic();
     if (!pressed) {
       this.sendSteer(0);
       return;
@@ -1362,6 +1741,7 @@ class RiverRaceGame {
     const normalized = clamp(Number(direction) || 0, -1, 1);
     if (normalized === this.lastSentDirection && this.state.status === "running") return;
     this.lastSentDirection = normalized;
+    this.unlockRaceMusic();
     this.submitCommand({ type: "steer", direction: normalized });
   }
 
@@ -1444,6 +1824,12 @@ function registerSocket() {
     if (message.type === "riverRaceState") {
       riverRaceGame ??= new RiverRaceGame();
       riverRaceGame.receiveSharedState(message.state);
+      return;
+    }
+
+    if (message.type === "riverRaceFrame") {
+      riverRaceGame ??= new RiverRaceGame();
+      riverRaceGame.receiveRaceFrame(message.state);
       return;
     }
 
